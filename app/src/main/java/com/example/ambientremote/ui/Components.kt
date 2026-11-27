@@ -190,6 +190,7 @@ fun DragStrip(
     modifier: Modifier = Modifier,
     showTapButtons: Boolean = false,
     stepDp: Dp = 22.dp,
+    framed: Boolean = true,
 ) {
     val theme = LocalRemoteTheme.current
     val haptics = rememberHaptics()
@@ -199,10 +200,14 @@ fun DragStrip(
     val shape = RoundedCornerShape(16.dp)
 
     Column(
-        modifier
-            .clip(shape)
-            .background(theme.fill)
-            .border(WireBorder, theme.border, shape)
+        if (framed) {
+            modifier
+                .clip(shape)
+                .background(theme.fill)
+                .border(WireBorder, theme.border, shape)
+        } else {
+            modifier
+        }
     ) {
         if (showTapButtons) {
             StripTapButton("+") { sendNow(upCommand) }

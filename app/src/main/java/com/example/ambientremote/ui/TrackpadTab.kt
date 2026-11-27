@@ -3,8 +3,11 @@ package com.example.ambientremote.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,77 +33,159 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.max
 
 private const val SENSITIVITY = 1.0f
 private const val SEND_INTERVAL_MS = 16L
 private const val TAP_MAX_MS = 280L
 
+/**
+ * Laptop-style trackpad: smooth surface with a scroll edge on the right,
+ * and physical-style left / middle / right buttons attached underneath.
+ */
 @Composable
 fun TrackpadTab(send: (String) -> Unit) {
+    val theme = LocalRemoteTheme.current
+    val shape = RoundedCornerShape(22.dp)
     Column(Modifier.fillMaxSize()) {
-        Row(
+        Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .clip(shape)
+                .border(WireBorder, theme.border, shape)
         ) {
-            DotGridTrackpad(
-                send = send,
-                modifier = Modifier
+            Row(
+                Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
+                    .fillMaxWidth()
+            ) {
+                TrackpadSurface(
+                    send = send,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .padding(vertical = 18.dp)
+                        .background(theme.faint)
+                )
+                DragStrip(
+                    label = "⇕",
+                    upCommand = "MOUSE_SCROLL_UP",
+                    downCommand = "MOUSE_SCROLL_DOWN",
+                    send = send,
+                    stepDp = 18.dp,
+                    framed = false,
+                    modifier = Modifier
+                        .width(48.dp)
+                        .fillMaxHeight()
+                        .background(theme.accent.copy(alpha = 0.05f)),
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(WireBorder)
+                    .background(theme.dim)
             )
-            Spacer(Modifier.width(10.dp))
-            DragStrip(
-                label = "SCR",
-                upCommand = "MOUSE_SCROLL_UP",
-                downCommand = "MOUSE_SCROLL_DOWN",
-                send = send,
-                stepDp = 18.dp,
-                modifier = Modifier
-                    .width(62.dp)
-                    .fillMaxHeight(),
-            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+            ) {
+                ClickButton("LEFT", "MOUSE_CLICK", send, Modifier.weight(2f).fillMaxHeight())
+                ButtonDivider()
+                ClickButton("•", "MOUSE_CENTER", send, Modifier.weight(0.8f).fillMaxHeight())
+                ButtonDivider()
+                ClickButton("RIGHT", "MOUSE_RIGHT_CLICK", send, Modifier.weight(2f).fillMaxHeight())
+            }
         }
-        Spacer(Modifier.height(16.dp))
-        BottomButtonRow(
-            listOf(
-                "L-CLICK" to "MOUSE_CLICK",
-                "R-CLICK" to "MOUSE_RIGHT_CLICK",
-                "CENTER" to "MOUSE_CENTER",
-                "BACK" to "BACK",
-            ),
-            send,
+        Spacer(Modifier.height(14.dp))
+        WireButton(
+            label = "BACK",
+            onClick = { send("BACK") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(25.dp),
+            fontSize = 14.sp,
         )
     }
 }
 
-/** Drag = throttled relative MOUSE_MOVE deltas, quick tap = MOUSE_CLICK. */
 @Composable
-private fun DotGridTrackpad(send: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ButtonDivider() {
+    val theme = LocalRemoteTheme.current
+    Box(
+        Modifier
+            .width(WireBorder)
+            .fillMaxHeight()
+            .background(theme.dim)
+    )
+}
+
+@Composable
+private fun ClickButton(label: String, command: String, send: (String) -> Unit, modifier: Modifier) {
+    val theme = LocalRemoteTheme.current
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Box(
+        modifier
+            .background(if (pressed) theme.fillPressed else theme.accent.copy(alpha = 0.04f))
+            .clickable(interactionSource = interaction, indication = null) {
+                haptics.heavy()
+                send(command)
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (pressed) theme.label else theme.dim,
+            fontSize = if (label.length == 1) 20.sp else 12.sp,
+            fontFamily = Mono,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/**
+ * One finger: move the pointer (throttled MOUSE_MOVE deltas). Quick tap: left click.
+ * Two fingers: drag to scroll, quick tap to right click.
+ */
+@Composable
+private fun TrackpadSurface(send: (String) -> Unit, modifier: Modifier = Modifier) {
     val theme = LocalRemoteTheme.current
     val haptics = rememberHaptics()
     val sendNow by rememberUpdatedState(send)
-    var touch by remember { mutableStateOf<Offset?>(null) }
-    val shape = RoundedCornerShape(22.dp)
+    var touches by remember { mutableStateOf<List<Offset>>(emptyList()) }
 
     Box(
         modifier
-            .clip(shape)
-            .background(theme.fill)
-            .border(WireBorder, theme.border, shape)
+            .background(theme.accent.copy(alpha = 0.09f))
             .pointerInput(Unit) {
                 val slop = viewConfiguration.touchSlop
+                val scrollStep = 18.dp.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     down.consume()
-                    touch = down.position
+                    touches = listOf(down.position)
                     val downTime = down.uptimeMillis
                     var pendingX = 0f
                     var pendingY = 0f
                     var travelled = 0f
                     var moving = false
+                    var scrolled = false
+                    var scrollAcc = 0f
+                    var maxFingers = 1
                     var lastSent = downTime
 
                     fun flush() {
@@ -115,20 +200,49 @@ private fun DotGridTrackpad(send: (String) -> Unit, modifier: Modifier = Modifie
 
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) {
-                            if (!moving && change.uptimeMillis - downTime <= TAP_MAX_MS) {
+                        val pressed = event.changes.filter { it.pressed }
+                        maxFingers = max(maxFingers, pressed.size)
+
+                        if (pressed.isEmpty()) {
+                            val upTime = event.changes.maxOfOrNull { it.uptimeMillis } ?: downTime
+                            if (!moving && !scrolled && upTime - downTime <= TAP_MAX_MS) {
                                 haptics.tap()
-                                sendNow("MOUSE_CLICK")
+                                sendNow(if (maxFingers >= 2) "MOUSE_RIGHT_CLICK" else "MOUSE_CLICK")
                             } else {
                                 flush()
                             }
-                            change.consume()
+                            event.changes.forEach { it.consume() }
                             break
                         }
+
+                        touches = pressed.map { it.position }
+
+                        if (pressed.size >= 2) {
+                            // Two-finger scroll (finger up = scroll up, like the scroll edge).
+                            val dy = pressed.map { it.positionChange().y }.average().toFloat()
+                            pressed.forEach { it.consume() }
+                            travelled += abs(dy)
+                            if (travelled > slop) scrolled = true
+                            if (scrolled) {
+                                scrollAcc += dy
+                                while (scrollAcc <= -scrollStep) {
+                                    scrollAcc += scrollStep
+                                    sendNow("MOUSE_SCROLL_UP")
+                                    haptics.tick()
+                                }
+                                while (scrollAcc >= scrollStep) {
+                                    scrollAcc -= scrollStep
+                                    sendNow("MOUSE_SCROLL_DOWN")
+                                    haptics.tick()
+                                }
+                            }
+                            continue
+                        }
+
+                        val change = pressed.first()
                         val delta = change.positionChange()
                         change.consume()
-                        touch = change.position
+                        if (maxFingers >= 2) continue // finishing a two-finger gesture
                         travelled += delta.getDistance()
                         if (!moving && travelled > slop) moving = true
                         if (moving) {
@@ -140,47 +254,30 @@ private fun DotGridTrackpad(send: (String) -> Unit, modifier: Modifier = Modifie
                             }
                         }
                     }
-                    touch = null
+                    touches = emptyList()
                 }
             },
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val step = 22.dp.toPx()
-            val radius = 1.4.dp.toPx()
-            val glow = 72.dp.toPx()
-            val cols = (size.width / step).toInt().coerceAtLeast(1)
-            val rows = (size.height / step).toInt().coerceAtLeast(1)
-            val offX = (size.width - (cols - 1) * step) / 2f
-            val offY = (size.height - (rows - 1) * step) / 2f
-            val t = touch
-            for (i in 0 until cols) {
-                for (j in 0 until rows) {
-                    val c = Offset(offX + i * step, offY + j * step)
-                    val near = t != null && (t - c).getDistance() < glow
-                    drawCircle(
-                        color = if (near) theme.dim else theme.faint,
-                        radius = if (near) radius * 1.5f else radius,
-                        center = c,
-                    )
-                }
-            }
-            if (t != null) {
+            val r = 26.dp.toPx()
+            touches.forEach { p ->
+                drawCircle(color = theme.accent.copy(alpha = 0.16f), radius = r, center = p)
                 drawCircle(
                     color = theme.border,
-                    radius = 24.dp.toPx(),
-                    center = t,
+                    radius = r,
+                    center = p,
                     style = Stroke(width = 1.5.dp.toPx()),
                 )
             }
         }
         Text(
-            "TAP · CLICK",
+            "TAP · CLICK    2 FINGERS · SCROLL",
             color = theme.faint,
             fontSize = 10.sp,
             fontFamily = Mono,
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(12.dp),
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp),
         )
     }
 }
