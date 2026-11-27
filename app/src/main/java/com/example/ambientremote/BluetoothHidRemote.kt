@@ -84,16 +84,16 @@ object BluetoothHidRemote {
         val app = context.applicationContext
         appContext = app
         if (!hasPermission(app)) {
-            setStatus(Status.NO_PERMISSION)
+            postStatus(Status.NO_PERMISSION)
             return
         }
         val adapter = adapter(app)
         if (adapter == null) {
-            setStatus(Status.UNAVAILABLE)
+            postStatus(Status.UNAVAILABLE)
             return
         }
         if (!adapter.isEnabled) {
-            setStatus(Status.BT_OFF)
+            postStatus(Status.BT_OFF)
             return
         }
         val proxy = hid
@@ -103,7 +103,7 @@ object BluetoothHidRemote {
         }
         if (proxyRequested) return
         proxyRequested = true
-        setStatus(Status.STARTING)
+        postStatus(Status.STARTING)
         val ok = adapter.getProfileProxy(app, object : BluetoothProfile.ServiceListener {
             override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
                 if (profile != BluetoothProfile.HID_DEVICE) return
@@ -128,7 +128,7 @@ object BluetoothHidRemote {
         }, BluetoothProfile.HID_DEVICE)
         if (!ok) {
             proxyRequested = false
-            setStatus(Status.UNAVAILABLE)
+            postStatus(Status.UNAVAILABLE)
         }
     }
 
@@ -146,7 +146,7 @@ object BluetoothHidRemote {
             Log.w(TAG, "registerApp failed", e)
             false
         }
-        if (!ok) setStatus(Status.UNAVAILABLE)
+        if (!ok) postStatus(Status.UNAVAILABLE)
     }
 
     private val callback = object : BluetoothHidDevice.Callback() {
@@ -161,7 +161,7 @@ object BluetoothHidRemote {
                 }
                 return
             }
-            if (host == null) setStatus(Status.READY)
+            if (host == null) postStatus(Status.READY)
             val target = pluggedDevice ?: lastHost()
             if (target != null && host == null) hid?.connect(target)
         }
@@ -178,7 +178,7 @@ object BluetoothHidRemote {
                         status = Status.CONNECTED
                     }
                 }
-                BluetoothProfile.STATE_CONNECTING -> if (host == null) setStatus(Status.CONNECTING)
+                BluetoothProfile.STATE_CONNECTING -> if (host == null) postStatus(Status.CONNECTING)
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     if (host?.address == device.address) host = null
                     if (host == null) {
@@ -217,7 +217,7 @@ object BluetoothHidRemote {
         val proxy = hid ?: return start(context)
         val device = adapter(context)?.getRemoteDevice(address) ?: return
         host?.let { if (it.address != address) proxy.disconnect(it) }
-        setStatus(Status.CONNECTING)
+        postStatus(Status.CONNECTING)
         proxy.connect(device)
     }
 
@@ -242,7 +242,7 @@ object BluetoothHidRemote {
             ?.edit()?.putString(KEY_LAST_HOST, address)?.apply()
     }
 
-    private fun setStatus(s: Status) {
+    private fun postStatus(s: Status) {
         if (Looper.myLooper() == Looper.getMainLooper()) status = s else main.post { status = s }
     }
 
