@@ -52,6 +52,23 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ambientremote.RemoteSettings
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.SystemClock
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import com.example.ambientremote.RemoteControlService
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -101,12 +118,33 @@ fun AmbientRemoteApp(
         outline = theme.dim,
     )
 
-    CompositionLocalProvider(LocalRemoteTheme provides theme) {
+    CompositionLocalProvider(
+        LocalRemoteTheme provides theme,
+        LocalHapticLevel provides settings.hapticLevel,
+    ) {
         MaterialTheme(colorScheme = colors) {
+            var lastPress by remember { mutableLongStateOf(SystemClock.uptimeMillis()) }
+            var dimmed by remember { mutableStateOf(false) }
+            val idleSec = settings.idleTimeoutSec
+            LaunchedEffect(lastPress, idleSec, dimmed, showSettings) {
+                if (idleSec > 0 && !dimmed && !showSettings) {
+                    delay(idleSec * 1_000L)
+                    dimmed = true
+                }
+            }
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(OledBlack)
+                    .pointerInput(Unit) {
+                        // Watch every touch (without consuming) to reset the idle timer.
+                        awaitPointerEventScope {
+                            while (true) {
+                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                if (e.type == PointerEventType.Press) lastPress = SystemClock.uptimeMillis()
+                            }
+                        }
+                    }
             ) {
                 Column(
                     Modifier
@@ -122,9 +160,13 @@ fun AmbientRemoteApp(
                             .padding(top = 12.dp, bottom = if (mode == RemoteMode.KEYBOARD) 10.dp else 12.dp)
                     ) {
                         TopBar(
-                            connectionLabel = if (settings.transport == Transport.BLUETOOTH) "BT" else "WIFI",
-                            connected = settings.transport == Transport.WIFI ||
-                                BluetoothHidRemote.status == BluetoothHidRemote.Status.CONNECTED,
+                            chip = {
+                                ConnectionChip(
+                                    settings = settings,
+                                    allowMenu = showExit,
+                                    onOpenSettings = { onShowSettingsChange(true) },
+                                )
+                            },
                             showExit = showExit,
                             exitLabel = if (onLockScreen) "EXIT LOCK" else "EXIT",
                             onExit = if (onLockScreen) onExitLockScreen else onExit,
@@ -141,7 +183,7 @@ fun AmbientRemoteApp(
                         ) {
                             when (mode) {
                                 RemoteMode.REMOTE -> RemoteTab(send)
-                                RemoteMode.TRACKPAD -> TrackpadTab(send)
+                                RemoteMode.TRACKPAD -> TrackpadTab(send, settings)
                                 RemoteMode.KEYBOARD -> KeyboardInputArea(keyboard, Modifier.fillMaxSize())
                             }
                         }
@@ -149,6 +191,22 @@ fun AmbientRemoteApp(
                     if (mode == RemoteMode.KEYBOARD) {
                         AndroidKeyboard(keyboard)
                     }
+                }
+                if (dimmed) {
+                    // Idle: pure black (OLED pixels off). First tap only wakes the screen.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(OledBlack)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    awaitFirstDown().consume()
+                                    dimmed = false
+                                    lastPress = SystemClock.uptimeMillis()
+                                    waitForUpOrCancellation()?.consume()
+                                }
+                            }
+                    )
                 }
             }
             if (showSettings) {
@@ -179,8 +237,7 @@ private fun jitter(): Int = Random.nextInt(8, 11) * (if (Random.nextBoolean()) 1
 
 @Composable
 private fun TopBar(
-    connectionLabel: String,
-    connected: Boolean,
+    chip: @Composable () -> Unit,
     showExit: Boolean,
     exitLabel: String,
     onExit: () -> Unit,
@@ -210,14 +267,7 @@ private fun TopBar(
                 .background(theme.accent, CircleShape)
         )
         Spacer(Modifier.width(10.dp))
-        WireButton(
-            label = connectionLabel,
-            onClick = onOpenSettings,
-            modifier = Modifier.height(34.dp),
-            horizontalPadding = 10.dp,
-            fontSize = 12.sp,
-            dimLabel = !connected,
-        )
+        chip()
         Spacer(Modifier.width(10.dp))
         WireButton(
             label = "⚙\uFE0E",
@@ -420,6 +470,8 @@ private fun SettingsDialog(
                     )
                 }
                 Spacer(Modifier.height(18.dp))
+                PhoneAndTrackpadSettings(settings)
+                Spacer(Modifier.height(18.dp))
                 Text(
                     "THEME · ${theme.name.uppercase()}",
                     color = theme.dim,
@@ -575,4 +627,218 @@ private fun BluetoothSection() {
             fontSize = 11.sp,
         )
     }
+}
+
+/** BT/WIFI chip in the top bar. In the app it opens a quick device switcher. */
+@Composable
+private fun ConnectionChip(settings: RemoteSettings, allowMenu: Boolean, onOpenSettings: () -> Unit) {
+    val theme = LocalRemoteTheme.current
+    val context = LocalContext.current
+    val bt = settings.transport == Transport.BLUETOOTH
+    val connected = !bt || BluetoothHidRemote.status == BluetoothHidRemote.Status.CONNECTED
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        WireButton(
+            label = if (bt) "BT" else "WIFI",
+            onClick = {
+                if (allowMenu) {
+                    menuOpen = true
+                } else {
+                    onOpenSettings()
+                }
+            },
+            modifier = Modifier.height(34.dp),
+            horizontalPadding = 10.dp,
+            fontSize = 12.sp,
+            dimLabel = !connected,
+        )
+        if (allowMenu) {
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                containerColor = OledBlack,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(WireBorder, theme.border),
+            ) {
+                val devices = remember(menuOpen) { BluetoothHidRemote.pairedDevices(context) }
+                devices.forEach { d ->
+                    val isCurrent = bt && d.address == BluetoothHidRemote.connectedAddress
+                    DropdownMenuItem(
+                        text = { MenuText((if (isCurrent) "● " else "   ") + d.name, true) },
+                        onClick = {
+                            menuOpen = false
+                            if (!bt) settings.updateTransport(Transport.BLUETOOTH)
+                            BluetoothHidRemote.start(context)
+                            BluetoothHidRemote.connect(context, d.address)
+                        },
+                    )
+                }
+                if (devices.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { MenuText("No paired devices yet", false) },
+                        onClick = {
+                            menuOpen = false
+                            onOpenSettings()
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { MenuText(if (bt) "Use Wi-Fi instead" else "Use Bluetooth", false) },
+                    onClick = {
+                        menuOpen = false
+                        val next = if (bt) Transport.WIFI else Transport.BLUETOOTH
+                        settings.updateTransport(next)
+                        if (next == Transport.BLUETOOTH) BluetoothHidRemote.start(context)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { MenuText("Connection settings…", false) },
+                    onClick = {
+                        menuOpen = false
+                        onOpenSettings()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuText(text: String, bright: Boolean) {
+    val theme = LocalRemoteTheme.current
+    Text(text, color = if (bright) theme.label else theme.dim, fontFamily = Mono, fontSize = 14.sp)
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    val theme = LocalRemoteTheme.current
+    Text(text, color = theme.dim, fontFamily = Mono, fontSize = 12.sp)
+    Spacer(Modifier.height(6.dp))
+}
+
+@Composable
+private fun SettingToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val theme = LocalRemoteTheme.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = theme.label, fontFamily = Mono, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = OledBlack,
+                checkedTrackColor = theme.accent,
+                checkedBorderColor = theme.accent,
+                uncheckedThumbColor = theme.dim,
+                uncheckedTrackColor = OledBlack,
+                uncheckedBorderColor = theme.dim,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun SegmentRow(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.forEachIndexed { i, label ->
+            WireButton(
+                label = label,
+                onClick = { onSelect(i) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp),
+                selected = i == selected,
+                dimLabel = i != selected,
+                fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LabelledSlider(
+    label: String,
+    valueText: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    onChange: (Float) -> Unit,
+) {
+    val theme = LocalRemoteTheme.current
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = theme.label, fontFamily = Mono, fontSize = 13.sp)
+        Spacer(Modifier.weight(1f))
+        Text(valueText, color = theme.label, fontFamily = Mono, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+    Slider(
+        value = value,
+        onValueChange = onChange,
+        valueRange = range,
+        steps = steps,
+        colors = SliderDefaults.colors(
+            thumbColor = theme.accent,
+            activeTrackColor = theme.accent,
+            inactiveTrackColor = theme.faint,
+            activeTickColor = OledBlack,
+            inactiveTickColor = theme.dim,
+        ),
+    )
+}
+
+private val IDLE_OPTIONS = listOf(0, 15, 30, 60)
+
+@Composable
+private fun PhoneAndTrackpadSettings(settings: RemoteSettings) {
+    val context = LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { RemoteControlService.start(context) }
+
+    SectionTitle("PHONE")
+    SettingToggle("Volume buttons control TV", settings.volumeKeys) { settings.updateVolumeKeys(it) }
+    SettingToggle("Notification controls", settings.notificationControls) { on ->
+        settings.updateNotificationControls(on)
+        if (!on) {
+            RemoteControlService.stop(context)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            RemoteControlService.start(context)
+        }
+    }
+
+    Spacer(Modifier.height(14.dp))
+    SectionTitle("TRACKPAD")
+    LabelledSlider(
+        label = "Pointer speed",
+        valueText = "${"%.1f".format(settings.pointerSpeed)}×",
+        value = settings.pointerSpeed,
+        range = 0.4f..3f,
+    ) { settings.updatePointerSpeed(it) }
+    SettingToggle("Pointer acceleration", settings.pointerAcceleration) { settings.updatePointerAcceleration(it) }
+    LabelledSlider(
+        label = "Scroll speed",
+        valueText = "${settings.scrollSpeed}",
+        value = settings.scrollSpeed.toFloat(),
+        range = 1f..5f,
+        steps = 3,
+    ) { settings.updateScrollSpeed(it.roundToInt()) }
+    SettingToggle("Natural scrolling", settings.naturalScroll) { settings.updateNaturalScroll(it) }
+
+    Spacer(Modifier.height(14.dp))
+    SectionTitle("BUTTON FEEL")
+    SegmentRow(listOf("OFF", "LIGHT", "STRONG"), settings.hapticLevel) { settings.updateHapticLevel(it) }
+
+    Spacer(Modifier.height(14.dp))
+    SectionTitle("DIM WHEN IDLE")
+    SegmentRow(
+        listOf("NEVER", "15 S", "30 S", "60 S"),
+        IDLE_OPTIONS.indexOf(settings.idleTimeoutSec).coerceAtLeast(0),
+    ) { settings.updateIdleTimeout(IDLE_OPTIONS[it]) }
 }

@@ -1,6 +1,8 @@
 package com.example.ambientremote
 
+import android.Manifest
 import android.app.KeyguardManager
+import android.content.pm.PackageManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
@@ -15,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -44,6 +47,7 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
     private val bluetoothPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             BluetoothHidRemote.start(this)
+            if (settings.notificationControls) RemoteControlService.start(this)
         }
 
     private var sensorManager: SensorManager? = null
@@ -80,9 +84,21 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
         hideSystemBars()
 
         client = CommandRouter(settings, UdpRemoteClient(lifecycleScope) { settings.ip to settings.port })
-        if (settings.transport == Transport.BLUETOOTH) {
-            if (BluetoothHidRemote.hasPermission(this)) BluetoothHidRemote.start(this)
-            else bluetoothPermission.launch(BluetoothHidRemote.requiredPermissions)
+        val missing = buildList {
+            if (settings.transport == Transport.BLUETOOTH && !BluetoothHidRemote.hasPermission(this@AmbientRemoteActivity)) {
+                addAll(BluetoothHidRemote.requiredPermissions)
+            }
+            if (settings.notificationControls && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (missing.isNotEmpty()) {
+            bluetoothPermission.launch(missing.toTypedArray())
+        } else {
+            if (settings.transport == Transport.BLUETOOTH) BluetoothHidRemote.start(this)
+            if (settings.notificationControls) RemoteControlService.start(this)
         }
 
         sensorManager = getSystemService(SensorManager::class.java)
@@ -213,6 +229,32 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
+    }
+
+    /** Phone volume buttons control the TV (setting). */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (settings.volumeKeys) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP -> {
+                    client.send("VOL_UP")
+                    return true
+                }
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    client.send("VOL_DOWN")
+                    return true
+                }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (settings.volumeKeys &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
     }
 
     /** Swallow every touch while blacked out (face-down / in a pocket). */

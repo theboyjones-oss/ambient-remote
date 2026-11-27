@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -66,11 +67,35 @@ fun RemoteTab(send: (String) -> Unit) {
                     .fillMaxHeight(),
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+        MediaRow(send)
+        Spacer(Modifier.height(12.dp))
         BottomButtonRow(
-            listOf("BACK" to "BACK", "HOME" to "HOME", "PLAY" to "PLAY_PAUSE", "MUTE" to "MUTE"),
+            listOf("BACK" to "BACK", "HOME" to "HOME", "MUTE" to "MUTE", "POWER" to "POWER"),
             send,
         )
+    }
+}
+
+/** Rewind / play-pause / fast-forward. */
+@Composable
+private fun MediaRow(send: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            "◀\uFE0E◀\uFE0E" to "REWIND",
+            "▶\uFE0E ❚❚" to "PLAY_PAUSE",
+            "▶\uFE0E▶\uFE0E" to "FAST_FORWARD",
+        ).forEach { (label, cmd) ->
+            WireButton(
+                label = label,
+                onClick = { send(cmd) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp),
+                shape = RoundedCornerShape(23.dp),
+                fontSize = 15.sp,
+            )
+        }
     }
 }
 

@@ -34,12 +34,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.ambientremote.RemoteSettings
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
-private const val SENSITIVITY = 1.0f
 private const val SEND_INTERVAL_MS = 16L
 private const val TAP_MAX_MS = 280L
 
@@ -48,8 +50,11 @@ private const val TAP_MAX_MS = 280L
  * and physical-style left / middle / right buttons attached underneath.
  */
 @Composable
-fun TrackpadTab(send: (String) -> Unit) {
+fun TrackpadTab(send: (String) -> Unit, settings: RemoteSettings) {
     val theme = LocalRemoteTheme.current
+    val scrollStep = scrollStepFor(settings.scrollSpeed)
+    val scrollUp = if (settings.naturalScroll) "MOUSE_SCROLL_DOWN" else "MOUSE_SCROLL_UP"
+    val scrollDown = if (settings.naturalScroll) "MOUSE_SCROLL_UP" else "MOUSE_SCROLL_DOWN"
     val shape = RoundedCornerShape(22.dp)
     Column(Modifier.fillMaxSize()) {
         Column(
@@ -66,6 +71,11 @@ fun TrackpadTab(send: (String) -> Unit) {
             ) {
                 TrackpadSurface(
                     send = send,
+                    speed = settings.pointerSpeed,
+                    acceleration = settings.pointerAcceleration,
+                    scrollStep = scrollStep,
+                    scrollUp = scrollUp,
+                    scrollDown = scrollDown,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
@@ -79,10 +89,10 @@ fun TrackpadTab(send: (String) -> Unit) {
                 )
                 DragStrip(
                     label = "⇕",
-                    upCommand = "MOUSE_SCROLL_UP",
-                    downCommand = "MOUSE_SCROLL_DOWN",
+                    upCommand = scrollUp,
+                    downCommand = scrollDown,
                     send = send,
-                    stepDp = 18.dp,
+                    stepDp = scrollStep,
                     framed = false,
                     modifier = Modifier
                         .width(48.dp)
@@ -162,10 +172,23 @@ private fun ClickButton(label: String, command: String, send: (String) -> Unit, 
  * Two fingers: drag to scroll, quick tap to right click.
  */
 @Composable
-private fun TrackpadSurface(send: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun TrackpadSurface(
+    send: (String) -> Unit,
+    speed: Float,
+    acceleration: Boolean,
+    scrollStep: Dp,
+    scrollUp: String,
+    scrollDown: String,
+    modifier: Modifier = Modifier,
+) {
     val theme = LocalRemoteTheme.current
     val haptics = rememberHaptics()
     val sendNow by rememberUpdatedState(send)
+    val speedNow by rememberUpdatedState(speed)
+    val accelNow by rememberUpdatedState(acceleration)
+    val stepNow by rememberUpdatedState(scrollStep)
+    val upNow by rememberUpdatedState(scrollUp)
+    val downNow by rememberUpdatedState(scrollDown)
     var touches by remember { mutableStateOf<List<Offset>>(emptyList()) }
 
     Box(
@@ -173,8 +196,8 @@ private fun TrackpadSurface(send: (String) -> Unit, modifier: Modifier = Modifie
             .background(theme.accent.copy(alpha = 0.09f))
             .pointerInput(Unit) {
                 val slop = viewConfiguration.touchSlop
-                val scrollStep = 18.dp.toPx()
                 awaitEachGesture {
+                    val scrollStepPx = stepNow.toPx()
                     val down = awaitFirstDown()
                     down.consume()
                     touches = listOf(down.position)
@@ -225,14 +248,14 @@ private fun TrackpadSurface(send: (String) -> Unit, modifier: Modifier = Modifie
                             if (travelled > slop) scrolled = true
                             if (scrolled) {
                                 scrollAcc += dy
-                                while (scrollAcc <= -scrollStep) {
-                                    scrollAcc += scrollStep
-                                    sendNow("MOUSE_SCROLL_UP")
+                                while (scrollAcc <= -scrollStepPx) {
+                                    scrollAcc += scrollStepPx
+                                    sendNow(upNow)
                                     haptics.tick()
                                 }
-                                while (scrollAcc >= scrollStep) {
-                                    scrollAcc -= scrollStep
-                                    sendNow("MOUSE_SCROLL_DOWN")
+                                while (scrollAcc >= scrollStepPx) {
+                                    scrollAcc -= scrollStepPx
+                                    sendNow(downNow)
                                     haptics.tick()
                                 }
                             }
@@ -246,8 +269,11 @@ private fun TrackpadSurface(send: (String) -> Unit, modifier: Modifier = Modifie
                         travelled += delta.getDistance()
                         if (!moving && travelled > slop) moving = true
                         if (moving) {
-                            pendingX += delta.x * SENSITIVITY
-                            pendingY += delta.y * SENSITIVITY
+                            val dt = max(1L, change.uptimeMillis - change.previousUptimeMillis)
+                            val velocity = delta.getDistance() / dt // px per ms
+                            val accel = if (accelNow) 1f + min(velocity * 0.45f, 2.2f) else 1f
+                            pendingX += delta.x * speedNow * accel
+                            pendingY += delta.y * speedNow * accel
                             if (change.uptimeMillis - lastSent >= SEND_INTERVAL_MS) {
                                 flush()
                                 lastSent = change.uptimeMillis
@@ -280,4 +306,13 @@ private fun TrackpadSurface(send: (String) -> Unit, modifier: Modifier = Modifie
                 .padding(bottom = 10.dp),
         )
     }
+}
+
+/** Scroll speed 1..5 → distance of finger travel per scroll step. */
+fun scrollStepFor(speed: Int): Dp = when (speed) {
+    1 -> 30.dp
+    2 -> 24.dp
+    3 -> 18.dp
+    4 -> 13.dp
+    else -> 9.dp
 }

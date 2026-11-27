@@ -2,6 +2,7 @@ package com.example.ambientremote
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHidDevice
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
@@ -44,6 +45,10 @@ object BluetoothHidRemote {
     var connectedAddress by mutableStateOf<String?>(null)
         private set
 
+    /** True when connected to a Mac/PC: BACK, HOME and SEARCH use computer shortcuts. */
+    var hostIsComputer by mutableStateOf(false)
+        private set
+
     val requiredPermissions: Array<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
@@ -58,6 +63,7 @@ object BluetoothHidRemote {
     private const val ID_KEYBOARD = 1
     private const val ID_MOUSE = 2
     private const val ID_CONSUMER = 3
+    private const val MOD_GUI = 0x08
 
     private var appContext: Context? = null
     private var hid: BluetoothHidDevice? = null
@@ -172,7 +178,11 @@ object BluetoothHidRemote {
                     host = device
                     saveLastHost(device.address)
                     val name = device.name ?: device.address
+                    val computer = device.bluetoothClass?.majorDeviceClass ==
+                        BluetoothClass.Device.Major.COMPUTER ||
+                        name.contains("mac", ignoreCase = true)
                     main.post {
+                        hostIsComputer = computer
                         connectedName = name
                         connectedAddress = device.address
                         status = Status.CONNECTED
@@ -269,9 +279,13 @@ object BluetoothHidRemote {
             cmd == "SELECT" -> tapKey(0x28)
             cmd == "KEY_ENTER" -> tapKey(0x28)
             cmd == "KEY_BACKSPACE" -> tapKey(0x2A)
-            cmd == "BACK" -> tapConsumer(0x0224)
-            cmd == "HOME" -> tapConsumer(0x0223)
-            cmd == "KEY_SEARCH" -> tapConsumer(0x0221)
+            // Mac/PC: Escape for back, Cmd/Win+Tab for home (app switch), Cmd/Win+Space for search.
+            cmd == "BACK" -> if (hostIsComputer) tapKey(0x29) else tapConsumer(0x0224)
+            cmd == "HOME" -> if (hostIsComputer) tapKey(0x2B, MOD_GUI) else tapConsumer(0x0223)
+            cmd == "KEY_SEARCH" -> if (hostIsComputer) tapKey(0x2C, MOD_GUI) else tapConsumer(0x0221)
+            cmd == "POWER" -> if (!hostIsComputer) tapConsumer(0x0030)
+            cmd == "REWIND" -> tapConsumer(0x00B4)
+            cmd == "FAST_FORWARD" -> tapConsumer(0x00B3)
             cmd == "PLAY_PAUSE" -> tapConsumer(0x00CD)
             cmd == "MUTE" -> tapConsumer(0x00E2)
             cmd == "VOL_UP" -> tapConsumer(0x00E9)

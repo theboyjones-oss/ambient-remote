@@ -1,6 +1,15 @@
 package com.example.ambientremote.ui
 
+import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
+import android.content.Intent
 import android.os.SystemClock
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,6 +79,17 @@ class KeyboardState(private val send: (String) -> Unit) {
             echo = (echo + c).takeLast(400)
         }
         if (shift == ShiftMode.ONCE) shift = ShiftMode.OFF
+    }
+
+    /** Whole phrase at once (voice typing, paste). */
+    fun typeText(text: String) {
+        if (text.isEmpty()) return
+        if (batch) {
+            buffer += text
+        } else {
+            send("KEY_TEXT:$text")
+            echo = (echo + text).takeLast(400)
+        }
     }
 
     fun backspace() {
@@ -157,14 +177,14 @@ private val SYMBOL_ROWS: List<List<KeySpec>> = listOf(
 fun KeyboardInputArea(state: KeyboardState, modifier: Modifier = Modifier) {
     val theme = LocalRemoteTheme.current
     Column(modifier) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             WireButton(
                 label = "LIVE",
                 onClick = { state.batch = false },
                 modifier = Modifier.weight(1f).height(34.dp),
                 selected = !state.batch,
                 dimLabel = state.batch,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
             )
             WireButton(
                 label = "BATCH",
@@ -172,14 +192,19 @@ fun KeyboardInputArea(state: KeyboardState, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f).height(34.dp),
                 selected = state.batch,
                 dimLabel = !state.batch,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
             )
+            // Voice needs an activity to show the speech prompt (not available in the screensaver).
+            if (LocalActivityResultRegistryOwner.current != null) {
+                VoiceButton(state, Modifier.weight(1f).height(34.dp))
+            }
+            PasteButton(state, Modifier.weight(1f).height(34.dp))
             if (state.batch) {
                 WireButton(
                     label = "SEND",
                     onClick = { state.sendBatch() },
                     modifier = Modifier.weight(1f).height(34.dp),
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                 )
             }
         }
@@ -214,6 +239,55 @@ fun KeyboardInputArea(state: KeyboardState, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+@Composable
+private fun VoiceButton(state: KeyboardState, modifier: Modifier) {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val text = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+        if (!text.isNullOrBlank()) state.typeText(text)
+    }
+    WireButton(
+        label = "VOICE",
+        onClick = {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say what to type on the TV")
+            try {
+                launcher.launch(intent)
+            } catch (_: ActivityNotFoundException) {
+                Toast.makeText(context, "No voice typing on this phone", Toast.LENGTH_SHORT).show()
+            }
+        },
+        modifier = modifier,
+        fontSize = 11.sp,
+    )
+}
+
+@Composable
+private fun PasteButton(state: KeyboardState, modifier: Modifier) {
+    val context = LocalContext.current
+    WireButton(
+        label = "PASTE",
+        onClick = {
+            val clipboard = context.getSystemService(ClipboardManager::class.java)
+            val text = clipboard?.primaryClip
+                ?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(context)
+                ?.toString()
+            if (text.isNullOrEmpty()) {
+                Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+            } else {
+                state.typeText(text)
+            }
+        },
+        modifier = modifier,
+        fontSize = 11.sp,
+    )
 }
 
 // ---------------------------------------------------------------- docked keyboard

@@ -1,6 +1,7 @@
 package com.example.ambientremote
 
 import android.content.Intent
+import android.view.KeyEvent
 import android.service.dreams.DreamService
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.ComposeView
@@ -80,6 +81,19 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
             }
         }
         setContentView(composeView)
+    }
+
+    /** Phone volume buttons control the TV (setting). */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val isVolume = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+            event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        if (settings.volumeKeys && isVolume) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                client.send(if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) "VOL_UP" else "VOL_DOWN")
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onDreamingStarted() {

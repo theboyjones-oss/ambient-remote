@@ -1,7 +1,12 @@
 package com.example.ambientremote.ui
 
 import android.view.HapticFeedbackConstants
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.View
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,24 +53,56 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class Haptics(private val view: View) {
+/** Haptic level from settings: 0 = off, 1 = light (system feedback), 2 = strong (vibrator). */
+val LocalHapticLevel = compositionLocalOf { 1 }
+
+class Haptics(private val view: View, private val level: Int) {
+    private val vibrator: Vibrator? by lazy {
+        val ctx = view.context
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ctx.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            ctx.getSystemService(Vibrator::class.java)
+        }
+    }
+
+    private fun strong(effect: Int, fallbackMs: Long, amplitude: Int) {
+        val v = vibrator ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            v.vibrate(VibrationEffect.createPredefined(effect))
+        } else {
+            v.vibrate(VibrationEffect.createOneShot(fallbackMs, amplitude))
+        }
+    }
+
     fun tap() {
-        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        when (level) {
+            1 -> view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            2 -> strong(VibrationEffect.EFFECT_CLICK, 22, 220)
+        }
     }
 
     fun tick() {
-        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        when (level) {
+            1 -> view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            2 -> strong(VibrationEffect.EFFECT_TICK, 12, 160)
+        }
     }
 
     fun heavy() {
-        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        when (level) {
+            1 -> view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            2 -> strong(VibrationEffect.EFFECT_HEAVY_CLICK, 40, 255)
+        }
     }
 }
 
 @Composable
 fun rememberHaptics(): Haptics {
     val view = LocalView.current
-    return remember(view) { Haptics(view) }
+    val level = LocalHapticLevel.current
+    return remember(view, level) { Haptics(view, level) }
 }
 
 /** Generic OLED wireframe button: dark tinted fill, crisp border, bright label. */
@@ -217,7 +254,7 @@ fun DragStrip(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .pointerInput(Unit) {
+                .pointerInput(stepDp, upCommand, downCommand) {
                     val step = stepDp.toPx()
                     var acc = 0f
                     detectVerticalDragGestures(
