@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Ambient Remote</string>
+    <string name="dream_label">Ambient Remote</string>
+    <string name="tile_label">TV Remote</string>
+</resources>
