@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.ambientremote"
-        minSdk = 27
+        minSdk = 28
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
         versionName = "1.0"

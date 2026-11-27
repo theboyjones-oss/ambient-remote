@@ -34,6 +34,17 @@ class RemoteSettings(context: Context) {
         prefs.edit().putFloat(KEY_BRIGHTNESS, brightness).apply()
     }
 
+    var transport by mutableStateOf(
+        runCatching { Transport.valueOf(prefs.getString(KEY_TRANSPORT, null) ?: "") }
+            .getOrDefault(Transport.BLUETOOTH)
+    )
+        private set
+
+    fun updateTransport(t: Transport) {
+        transport = t
+        prefs.edit().putString(KEY_TRANSPORT, t.name).apply()
+    }
+
     fun setTarget(newIp: String, newPort: Int) {
         ip = newIp.trim()
         port = newPort
@@ -53,6 +64,7 @@ class RemoteSettings(context: Context) {
         private const val KEY_PORT = "port"
         private const val KEY_THEME = "theme"
         private const val KEY_BRIGHTNESS = "brightness"
+        private const val KEY_TRANSPORT = "transport"
         const val DEFAULT_BRIGHTNESS = 0.15f
         const val MIN_BRIGHTNESS = 0.01f
     }

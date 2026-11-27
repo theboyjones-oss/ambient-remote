@@ -144,7 +144,7 @@ private val LETTER_ROWS: List<List<KeySpec>> = listOf(
 )
 
 private val SYMBOL_ROWS: List<List<KeySpec>> = listOf(
-    chars("@#£_&-+()/"),
+    chars("@#\$_&-+()/"),
     listOf(GapKey(0.5f)) + chars("*\"':;!?=%") + GapKey(0.5f),
     listOf(CharKey("~", 1.5f)) + chars("[]{}<>\\") + FnKey(Fn.BACKSPACE, 1.5f),
     BOTTOM_ROW,

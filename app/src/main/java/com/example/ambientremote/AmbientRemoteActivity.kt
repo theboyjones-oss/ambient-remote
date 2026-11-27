@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,7 +32,12 @@ import com.example.ambientremote.ui.OledBlack
 class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var settings: RemoteSettings
-    private lateinit var client: UdpRemoteClient
+    private lateinit var client: CommandRouter
+
+    private val bluetoothPermission =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            BluetoothHidRemote.start(this)
+        }
 
     private var sensorManager: SensorManager? = null
     private var proximity: Sensor? = null
@@ -59,7 +65,11 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
 
-        client = UdpRemoteClient(lifecycleScope) { settings.ip to settings.port }
+        client = CommandRouter(settings, UdpRemoteClient(lifecycleScope) { settings.ip to settings.port })
+        if (settings.transport == Transport.BLUETOOTH) {
+            if (BluetoothHidRemote.hasPermission(this)) BluetoothHidRemote.start(this)
+            else bluetoothPermission.launch(BluetoothHidRemote.requiredPermissions)
+        }
 
         sensorManager = getSystemService(SensorManager::class.java)
         proximity = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
@@ -93,6 +103,7 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
     override fun onResume() {
         super.onResume()
         hideSystemBars()
+        if (settings.transport == Transport.BLUETOOTH) BluetoothHidRemote.start(this)
         proximity?.let {
             sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }

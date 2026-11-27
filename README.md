@@ -1,7 +1,9 @@
 # Ambient Remote
 
 OLED "ambient" TV remote for Android (Kotlin + Jetpack Compose).
-Package `com.example.ambientremote`, minSdk 27, targetSdk 35.
+Package `com.example.ambientremote`, minSdk 28, targetSdk 35.
+
+**Connection:** Bluetooth (default) makes the phone a Bluetooth keyboard + mouse + media remote, so it works with Google TV, Nvidia Shield, Mac or PC with nothing installed on them. Wi-Fi mode sends the UDP commands below to a receiver at IP:port. Switch in ⚙ settings.
 
 ## Build
 **Android Studio:** File → Open → this folder → let Gradle sync → Build → Build APK(s).
@@ -15,6 +17,7 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`
 | `AmbientRemoteActivity` | Full-screen black UI over the lock screen, adjustable brightness (default 15%, slider in ⚙ settings), keeps screen on, hidden system bars, proximity blackout + touch swallow |
 | `AmbientDreamService` | Interactive screensaver hosting the same Compose UI (Settings → Display → Screen saver → Ambient Remote) |
 | `SofaModeTileService` | Quick Settings tile "TV Remote" → opens the activity |
+| `BluetoothHidRemote` | Registers the phone as a Bluetooth HID keyboard/mouse/consumer-control device and maps commands to HID reports |
 | `UdpRemoteClient` | Sends each command as one UTF-8 UDP datagram to IP:port (default 192.168.1.100:9876) |
 | `RemoteSettings` | IP, port and theme in SharedPreferences |
 

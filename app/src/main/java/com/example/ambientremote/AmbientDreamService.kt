@@ -33,7 +33,7 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var settings: RemoteSettings
-    private lateinit var client: UdpRemoteClient
+    private lateinit var client: CommandRouter
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry
@@ -45,7 +45,8 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
         savedStateController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         settings = RemoteSettings(this)
-        client = UdpRemoteClient(scope) { settings.ip to settings.port }
+        client = CommandRouter(settings, UdpRemoteClient(scope) { settings.ip to settings.port })
+        if (settings.transport == Transport.BLUETOOTH) BluetoothHidRemote.start(this)
     }
 
     override fun onAttachedToWindow() {

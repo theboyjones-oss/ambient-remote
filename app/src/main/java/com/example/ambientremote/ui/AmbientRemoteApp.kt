@@ -52,7 +52,14 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ambientremote.RemoteSettings
-import com.example.ambientremote.UdpRemoteClient
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.example.ambientremote.BluetoothHidRemote
+import com.example.ambientremote.CommandRouter
+import com.example.ambientremote.Transport
 import kotlinx.coroutines.delay
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -68,7 +75,7 @@ enum class RemoteMode(val title: String) {
 /** Shared UI for both AmbientRemoteActivity and AmbientDreamService. */
 @Composable
 fun AmbientRemoteApp(
-    client: UdpRemoteClient,
+    client: CommandRouter,
     settings: RemoteSettings,
     showExit: Boolean,
     onExit: () -> Unit,
@@ -112,6 +119,9 @@ fun AmbientRemoteApp(
                             .padding(top = 12.dp, bottom = if (mode == RemoteMode.KEYBOARD) 10.dp else 12.dp)
                     ) {
                         TopBar(
+                            connectionLabel = if (settings.transport == Transport.BLUETOOTH) "BT" else "WIFI",
+                            connected = settings.transport == Transport.WIFI ||
+                                BluetoothHidRemote.status == BluetoothHidRemote.Status.CONNECTED,
                             showExit = showExit,
                             onExit = onExit,
                             onCycleTheme = { settings.cycleTheme() },
@@ -161,6 +171,8 @@ private fun jitter(): Int = Random.nextInt(8, 11) * (if (Random.nextBoolean()) 1
 
 @Composable
 private fun TopBar(
+    connectionLabel: String,
+    connected: Boolean,
     showExit: Boolean,
     onExit: () -> Unit,
     onCycleTheme: () -> Unit,
@@ -187,6 +199,15 @@ private fun TopBar(
                 .border(WireBorder, theme.border, CircleShape)
                 .padding(7.dp)
                 .background(theme.accent, CircleShape)
+        )
+        Spacer(Modifier.width(10.dp))
+        WireButton(
+            label = connectionLabel,
+            onClick = onOpenSettings,
+            modifier = Modifier.height(34.dp),
+            horizontalPadding = 10.dp,
+            fontSize = 12.sp,
+            dimLabel = !connected,
         )
         Spacer(Modifier.width(10.dp))
         WireButton(
@@ -255,7 +276,8 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
     var ip by remember { mutableStateOf(settings.ip) }
     var port by remember { mutableStateOf(settings.port.toString()) }
     val portValue = port.toIntOrNull()
-    val valid = ip.isNotBlank() && portValue != null && portValue in 1..65535
+    val wifiValid = ip.isNotBlank() && portValue != null && portValue in 1..65535
+    val valid = settings.transport == Transport.BLUETOOTH || wifiValid
     val shape = RoundedCornerShape(18.dp)
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
@@ -302,28 +324,45 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
                     ),
                 )
                 Spacer(Modifier.height(14.dp))
-                Text("TARGET DEVICE", color = theme.dim, fontFamily = Mono, fontSize = 12.sp)
-                Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = ip,
-                    onValueChange = { ip = it.trim() },
-                    label = { Text("IP address", fontFamily = Mono) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    colors = fieldColors,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Text("CONNECTION", color = theme.dim, fontFamily = Mono, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Transport.entries.forEach { t ->
+                        WireButton(
+                            label = if (t == Transport.BLUETOOTH) "BLUETOOTH" else "WI-FI",
+                            onClick = { settings.updateTransport(t) },
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            selected = settings.transport == t,
+                            dimLabel = settings.transport != t,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = port,
-                    onValueChange = { v -> port = v.filter { it.isDigit() }.take(5) },
-                    label = { Text("UDP port", fontFamily = Mono) },
-                    singleLine = true,
-                    isError = !valid,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = fieldColors,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (settings.transport == Transport.BLUETOOTH) {
+                    BluetoothSection()
+                } else {
+                    OutlinedTextField(
+                        value = ip,
+                        onValueChange = { ip = it.trim() },
+                        label = { Text("IP address", fontFamily = Mono) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = port,
+                        onValueChange = { v -> port = v.filter { it.isDigit() }.take(5) },
+                        label = { Text("UDP port", fontFamily = Mono) },
+                        singleLine = true,
+                        isError = !wifiValid,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Spacer(Modifier.height(18.dp))
                 Text(
                     "THEME · ${theme.name.uppercase()}",
@@ -359,7 +398,7 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
             TextButton(
                 enabled = valid,
                 onClick = {
-                    if (portValue != null) settings.setTarget(ip, portValue)
+                    if (wifiValid && portValue != null) settings.setTarget(ip, portValue)
                     onDismiss()
                 },
                 colors = ButtonDefaults.textButtonColors(
@@ -375,4 +414,109 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
             ) { Text("CANCEL", fontFamily = Mono) }
         },
     )
+}
+
+@Composable
+private fun BluetoothSection() {
+    val theme = LocalRemoteTheme.current
+    val context = LocalContext.current
+    val status = BluetoothHidRemote.status
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { BluetoothHidRemote.start(context) }
+    val systemLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { BluetoothHidRemote.start(context) }
+    LaunchedEffect(Unit) { BluetoothHidRemote.start(context) }
+
+    val statusText = when (status) {
+        BluetoothHidRemote.Status.CONNECTED -> "Connected to ${BluetoothHidRemote.connectedName ?: "device"}"
+        BluetoothHidRemote.Status.CONNECTING -> "Connecting…"
+        BluetoothHidRemote.Status.READY -> "Not connected. Tap a device below."
+        BluetoothHidRemote.Status.STARTING -> "Starting Bluetooth…"
+        BluetoothHidRemote.Status.BT_OFF -> "Bluetooth is off"
+        BluetoothHidRemote.Status.NO_PERMISSION -> "Bluetooth permission needed"
+        BluetoothHidRemote.Status.UNAVAILABLE ->
+            "Bluetooth keyboard mode isn't available. Close other remote apps (like TV Trackpad) and reopen."
+    }
+    Text(
+        statusText,
+        color = if (status == BluetoothHidRemote.Status.CONNECTED) theme.label else theme.dim,
+        fontFamily = Mono,
+        fontSize = 13.sp,
+    )
+    Spacer(Modifier.height(8.dp))
+
+    when (status) {
+        BluetoothHidRemote.Status.NO_PERMISSION -> WireButton(
+            label = "ALLOW BLUETOOTH",
+            onClick = { permissionLauncher.launch(BluetoothHidRemote.requiredPermissions) },
+            modifier = Modifier.fillMaxWidth().height(40.dp),
+            fontSize = 12.sp,
+        )
+        BluetoothHidRemote.Status.BT_OFF -> WireButton(
+            label = "TURN ON BLUETOOTH",
+            onClick = { systemLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
+            modifier = Modifier.fillMaxWidth().height(40.dp),
+            fontSize = 12.sp,
+        )
+        else -> Unit
+    }
+
+    val ready = status == BluetoothHidRemote.Status.READY ||
+        status == BluetoothHidRemote.Status.CONNECTING ||
+        status == BluetoothHidRemote.Status.CONNECTED
+    if (ready) {
+        val devices = remember(status, BluetoothHidRemote.connectedAddress) {
+            BluetoothHidRemote.pairedDevices(context)
+        }
+        Text("PAIRED DEVICES", color = theme.dim, fontFamily = Mono, fontSize = 11.sp)
+        Spacer(Modifier.height(6.dp))
+        if (devices.isEmpty()) {
+            Text("None yet. Pair one below.", color = theme.faint, fontFamily = Mono, fontSize = 12.sp)
+        }
+        devices.forEach { d ->
+            WireButton(
+                label = d.name,
+                onClick = { BluetoothHidRemote.connect(context, d.address) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+                    .height(40.dp),
+                selected = d.address == BluetoothHidRemote.connectedAddress,
+                fontSize = 13.sp,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WireButton(
+                label = "MAKE VISIBLE",
+                onClick = {
+                    systemLauncher.launch(
+                        Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+                            .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)
+                    )
+                },
+                modifier = Modifier.weight(1f).height(38.dp),
+                fontSize = 11.sp,
+            )
+            if (status == BluetoothHidRemote.Status.CONNECTED) {
+                WireButton(
+                    label = "DISCONNECT",
+                    onClick = { BluetoothHidRemote.disconnect() },
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    dimLabel = true,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "New device: tap MAKE VISIBLE, then pair this phone from the TV " +
+                "(Settings › Remotes & Accessories › Pair accessory) or Mac (System Settings › Bluetooth).",
+            color = theme.faint,
+            fontFamily = Mono,
+            fontSize = 11.sp,
+        )
+    }
 }
