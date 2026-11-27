@@ -68,6 +68,7 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        AppSession.enter()
         settings = RemoteSettings(this)
         applyLockScreenMode(settings.runOnLockScreen)
 
@@ -121,7 +122,7 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
                     client = client,
                     settings = settings,
                     showExit = true,
-                    onExit = { finish() },
+                    onExit = { finishAndRemoveTask() },
                     showSettings = showSettings,
                     onShowSettingsChange = { showSettings = it },
                     onEnterLockScreen = { enterLockScreen() },
@@ -222,8 +223,10 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         client.close()
+        // Leaving the app (EXIT, Back, or swiped away): shut everything down.
+        if (!isChangingConfigurations) AppSession.leave(this)
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

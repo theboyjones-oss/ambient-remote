@@ -59,7 +59,14 @@ class RemoteControlService : Service() {
             if (settings.transport == Transport.BLUETOOTH) BluetoothHidRemote.start(this)
             router.send(cmd)
         }
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    /** Swiped away from recent apps: close completely. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        AppSession.shutdown(this)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

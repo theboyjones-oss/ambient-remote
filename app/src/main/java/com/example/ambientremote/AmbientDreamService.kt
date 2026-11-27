@@ -42,6 +42,7 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
 
     override fun onCreate() {
         super.onCreate()
+        AppSession.enter()
         savedStateController.performAttach()
         savedStateController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
@@ -112,6 +113,7 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         client.close()
         scope.cancel()
+        AppSession.leave(this)
         super.onDestroy()
     }
 

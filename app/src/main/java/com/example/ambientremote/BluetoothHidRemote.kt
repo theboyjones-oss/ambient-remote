@@ -216,6 +216,33 @@ object BluetoothHidRemote {
         }
     }
 
+    /** Disconnect, unregister the Bluetooth keyboard and release the profile so nothing runs. */
+    fun shutdown(context: Context) {
+        val proxy = hid
+        try {
+            host?.let { proxy?.disconnect(it) }
+            if (registered) proxy?.unregisterApp()
+        } catch (e: Exception) {
+            Log.w(TAG, "shutdown", e)
+        }
+        if (proxy != null) {
+            try {
+                adapter(context)?.closeProfileProxy(BluetoothProfile.HID_DEVICE, proxy)
+            } catch (_: Exception) {
+            }
+        }
+        hid = null
+        host = null
+        registered = false
+        proxyRequested = false
+        main.post {
+            connectedName = null
+            connectedAddress = null
+            hostIsComputer = false
+            status = Status.STARTING
+        }
+    }
+
     fun pairedDevices(context: Context): List<PairedDevice> {
         if (!hasPermission(context)) return emptyList()
         return adapter(context)?.bondedDevices.orEmpty()
