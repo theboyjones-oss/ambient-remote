@@ -29,7 +29,7 @@ class RemoteSettings(context: Context) {
     )
         private set
 
-    fun setBrightness(level: Float) {
+    fun updateBrightness(level: Float) {
         brightness = level.coerceIn(MIN_BRIGHTNESS, 1f)
         prefs.edit().putFloat(KEY_BRIGHTNESS, brightness).apply()
     }

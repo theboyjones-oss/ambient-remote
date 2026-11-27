@@ -293,7 +293,7 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
                 }
                 Slider(
                     value = settings.brightness,
-                    onValueChange = { settings.setBrightness(it) },
+                    onValueChange = { settings.updateBrightness(it) },
                     valueRange = RemoteSettings.MIN_BRIGHTNESS..1f,
                     colors = SliderDefaults.colors(
                         thumbColor = theme.accent,
