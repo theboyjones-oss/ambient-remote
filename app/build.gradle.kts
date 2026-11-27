@@ -14,15 +14,32 @@ android {
         applicationId = "com.example.ambientremote"
         minSdk = 27
         targetSdk = 35
-        versionCode = 1
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
         versionName = "1.0"
+    }
+
+    // One permanent key so every build installs as an update over the last one.
+    // CI provides it via SIGNING_KEYSTORE / SIGNING_PASSWORD; without them it falls back to the debug key.
+    val keystorePath = System.getenv("SIGNING_KEYSTORE")
+    val keystorePassword = System.getenv("SIGNING_PASSWORD")
+    val hasReleaseKey = !keystorePath.isNullOrBlank() && file(keystorePath).exists() && !keystorePassword.isNullOrBlank()
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("permanent") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = "ambientremote"
+                keyPassword = keystorePassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the release APK installs straight away.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("permanent")
+            else signingConfigs.getByName("debug")
         }
     }
 

@@ -16,7 +16,17 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v5
       - name: Build APKs
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then
+            echo "$SIGNING_KEYSTORE_B64" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/release.p12"
+            export SIGNING_KEYSTORE="$RUNNER_TEMP/release.p12"
+            echo "Signing with the permanent key"
+          else
+            echo "::warning::SIGNING_KEYSTORE_B64 secret missing - APK signed with a throwaway key and will not update an installed copy"
+          fi
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease
