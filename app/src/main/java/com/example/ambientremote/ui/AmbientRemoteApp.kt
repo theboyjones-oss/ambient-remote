@@ -82,6 +82,8 @@ fun AmbientRemoteApp(
     showSettings: Boolean,
     onShowSettingsChange: (Boolean) -> Unit,
     onEnterLockScreen: (() -> Unit)? = null,
+    onLockScreen: Boolean = false,
+    onExitLockScreen: () -> Unit = {},
 ) {
     val theme = RemoteThemes[settings.themeIndex]
     var mode by rememberSaveable { mutableStateOf(RemoteMode.REMOTE) }
@@ -124,7 +126,8 @@ fun AmbientRemoteApp(
                             connected = settings.transport == Transport.WIFI ||
                                 BluetoothHidRemote.status == BluetoothHidRemote.Status.CONNECTED,
                             showExit = showExit,
-                            onExit = onExit,
+                            exitLabel = if (onLockScreen) "EXIT LOCK" else "EXIT",
+                            onExit = if (onLockScreen) onExitLockScreen else onExit,
                             onCycleTheme = { settings.cycleTheme() },
                             onOpenSettings = { onShowSettingsChange(true) },
                         )
@@ -179,6 +182,7 @@ private fun TopBar(
     connectionLabel: String,
     connected: Boolean,
     showExit: Boolean,
+    exitLabel: String,
     onExit: () -> Unit,
     onCycleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -225,7 +229,7 @@ private fun TopBar(
         if (showExit) {
             Spacer(Modifier.width(10.dp))
             WireButton(
-                label = "EXIT",
+                label = exitLabel,
                 onClick = onExit,
                 modifier = Modifier.height(34.dp),
                 horizontalPadding = 12.dp,

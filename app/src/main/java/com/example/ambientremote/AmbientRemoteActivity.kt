@@ -109,6 +109,8 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
                     showSettings = showSettings,
                     onShowSettingsChange = { showSettings = it },
                     onEnterLockScreen = { enterLockScreen() },
+                    onLockScreen = onLockScreen,
+                    onExitLockScreen = { exitLockScreen() },
                 )
                 if (blackout) {
                     Box(Modifier.fillMaxSize().background(OledBlack))
@@ -146,6 +148,20 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
                     )
             )
         }
+    }
+
+    /** "Exit lock screen": ask for the normal unlock (fingerprint/PIN), keeping the remote open. */
+    private fun exitLockScreen() {
+        val km = keyguard() ?: return
+        if (!km.isKeyguardLocked) {
+            onLockScreen = false
+            return
+        }
+        km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() {
+                onLockScreen = false
+            }
+        })
     }
 
     private fun lockAndShowRemote() {
