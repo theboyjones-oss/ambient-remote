@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,6 +28,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -52,6 +56,7 @@ import com.example.ambientremote.UdpRemoteClient
 import kotlinx.coroutines.delay
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 enum class RemoteMode(val title: String) {
@@ -74,6 +79,7 @@ fun AmbientRemoteApp(
     var mode by rememberSaveable { mutableStateOf(RemoteMode.REMOTE) }
     val burnIn = rememberBurnInOffset()
     val send: (String) -> Unit = remember(client) { { cmd: String -> client.send(cmd) } }
+    val keyboard = remember(send) { KeyboardState(send) }
 
     val colors = darkColorScheme(
         primary = theme.accent,
@@ -97,27 +103,37 @@ fun AmbientRemoteApp(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.displayCutout)
                         .offset { burnIn.value }
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
-                    TopBar(
-                        showExit = showExit,
-                        onExit = onExit,
-                        onCycleTheme = { settings.cycleTheme() },
-                        onOpenSettings = { onShowSettingsChange(true) },
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    ModeTabs(mode) { mode = it }
-                    Spacer(Modifier.height(12.dp))
-                    Box(
+                    Column(
                         Modifier
                             .weight(1f)
                             .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                            .padding(top = 12.dp, bottom = if (mode == RemoteMode.KEYBOARD) 10.dp else 12.dp)
                     ) {
-                        when (mode) {
-                            RemoteMode.REMOTE -> RemoteTab(send)
-                            RemoteMode.TRACKPAD -> TrackpadTab(send)
-                            RemoteMode.KEYBOARD -> KeyboardTab(send)
+                        TopBar(
+                            showExit = showExit,
+                            onExit = onExit,
+                            onCycleTheme = { settings.cycleTheme() },
+                            onOpenSettings = { onShowSettingsChange(true) },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        ModeTabs(mode) { mode = it }
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            when (mode) {
+                                RemoteMode.REMOTE -> RemoteTab(send)
+                                RemoteMode.TRACKPAD -> TrackpadTab(send)
+                                RemoteMode.KEYBOARD -> KeyboardInputArea(keyboard, Modifier.fillMaxSize())
+                            }
                         }
+                    }
+                    if (mode == RemoteMode.KEYBOARD) {
+                        AndroidKeyboard(keyboard)
                     }
                 }
             }
@@ -174,10 +190,11 @@ private fun TopBar(
         )
         Spacer(Modifier.width(10.dp))
         WireButton(
-            label = "IP",
+            label = "⚙\uFE0E",
             onClick = onOpenSettings,
             modifier = Modifier.height(34.dp),
-            horizontalPadding = 14.dp,
+            horizontalPadding = 12.dp,
+            fontSize = 18.sp,
         )
         if (showExit) {
             Spacer(Modifier.width(10.dp))
@@ -260,9 +277,33 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
         containerColor = OledBlack,
         titleContentColor = theme.label,
         textContentColor = theme.label,
-        title = { Text("TARGET DEVICE", fontFamily = Mono, fontWeight = FontWeight.Bold) },
+        title = { Text("SETTINGS", fontFamily = Mono, fontWeight = FontWeight.Bold) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("BRIGHTNESS", color = theme.dim, fontFamily = Mono, fontSize = 12.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "${(settings.brightness * 100).roundToInt()}%",
+                        color = theme.label,
+                        fontFamily = Mono,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Slider(
+                    value = settings.brightness,
+                    onValueChange = { settings.setBrightness(it) },
+                    valueRange = RemoteSettings.MIN_BRIGHTNESS..1f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = theme.accent,
+                        activeTrackColor = theme.accent,
+                        inactiveTrackColor = theme.faint,
+                    ),
+                )
+                Spacer(Modifier.height(14.dp))
+                Text("TARGET DEVICE", color = theme.dim, fontFamily = Mono, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = ip,
                     onValueChange = { ip = it.trim() },

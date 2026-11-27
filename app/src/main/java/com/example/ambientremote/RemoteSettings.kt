@@ -1,7 +1,9 @@
 package com.example.ambientremote
 
 import android.content.Context
+import android.view.Window
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -21,6 +23,17 @@ class RemoteSettings(context: Context) {
     )
         private set
 
+    /** Screen brightness for the remote, 0.01 (1%) to 1.0 (100%). */
+    var brightness by mutableFloatStateOf(
+        prefs.getFloat(KEY_BRIGHTNESS, DEFAULT_BRIGHTNESS).coerceIn(MIN_BRIGHTNESS, 1f)
+    )
+        private set
+
+    fun setBrightness(level: Float) {
+        brightness = level.coerceIn(MIN_BRIGHTNESS, 1f)
+        prefs.edit().putFloat(KEY_BRIGHTNESS, brightness).apply()
+    }
+
     fun setTarget(newIp: String, newPort: Int) {
         ip = newIp.trim()
         port = newPort
@@ -39,5 +52,13 @@ class RemoteSettings(context: Context) {
         private const val KEY_IP = "ip"
         private const val KEY_PORT = "port"
         private const val KEY_THEME = "theme"
+        private const val KEY_BRIGHTNESS = "brightness"
+        const val DEFAULT_BRIGHTNESS = 0.15f
+        const val MIN_BRIGHTNESS = 0.01f
     }
+}
+
+/** Overrides this window's screen brightness (0..1). */
+fun Window.applyBrightness(level: Float) {
+    attributes = attributes.apply { screenBrightness = level }
 }

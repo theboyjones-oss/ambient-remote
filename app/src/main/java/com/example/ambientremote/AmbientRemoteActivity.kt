@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -47,8 +48,9 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
+        settings = RemoteSettings(this)
         window.attributes = window.attributes.apply {
-            screenBrightness = AMBIENT_BRIGHTNESS
+            screenBrightness = settings.brightness
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -57,7 +59,6 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
 
-        settings = RemoteSettings(this)
         client = UdpRemoteClient(lifecycleScope) { settings.ip to settings.port }
 
         sensorManager = getSystemService(SensorManager::class.java)
@@ -66,6 +67,7 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
         showSettings = intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true
 
         setContent {
+            LaunchedEffect(settings.brightness) { window.applyBrightness(settings.brightness) }
             Box(Modifier.fillMaxSize().background(OledBlack)) {
                 AmbientRemoteApp(
                     client = client,
@@ -136,7 +138,6 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
 
     companion object {
         const val EXTRA_OPEN_SETTINGS = "open_settings"
-        private const val AMBIENT_BRIGHTNESS = 0.03f
         private const val NEAR_THRESHOLD_CM = 5f
     }
 }

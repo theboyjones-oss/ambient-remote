@@ -2,6 +2,7 @@ package com.example.ambientremote
 
 import android.content.Intent
 import android.service.dreams.DreamService
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.WindowCompat
@@ -51,7 +52,8 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
         super.onAttachedToWindow()
         isInteractive = true
         isFullscreen = true
-        isScreenBright = false
+        // Bright mode on so the user's brightness setting controls the level instead of the system dim.
+        isScreenBright = true
 
         val win = window
         win.decorView.setViewTreeLifecycleOwner(this)
@@ -65,6 +67,7 @@ class AmbientDreamService : DreamService(), LifecycleOwner, SavedStateRegistryOw
         val composeView = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
+                LaunchedEffect(settings.brightness) { win.applyBrightness(settings.brightness) }
                 AmbientRemoteApp(
                     client = client,
                     settings = settings,
