@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,7 +81,15 @@ private fun swipeDirection(delta: Offset): String =
         if (delta.y > 0) "DOWN" else "UP"
     }
 
-/** Blind-touch pad: swipe = direction, tap = SELECT, long-press = BACK. */
+/** D-pad zones around the centre: inside the circle = SELECT, on the ring = arrow, elsewhere = null. */
+private val CENTER_RADIUS = 43.dp
+private val ARROW_DISTANCE = 80.dp
+private val ARROW_SIZE = 56.dp
+
+/**
+ * Blind-touch pad: swipe anywhere = direction, long-press = BACK,
+ * tap an arrow = that direction, tap the circle (or anywhere else) = SELECT.
+ */
 @Composable
 private fun GesturePad(send: (String) -> Unit, modifier: Modifier = Modifier) {
     val theme = LocalRemoteTheme.current
@@ -88,6 +97,7 @@ private fun GesturePad(send: (String) -> Unit, modifier: Modifier = Modifier) {
     val sendNow by rememberUpdatedState(send)
     var flash by remember { mutableStateOf<String?>(null) }
     var flashId by remember { mutableIntStateOf(0) }
+    var pressedZone by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(flashId) {
         if (flashId > 0) {
             delay(450)
@@ -103,9 +113,23 @@ private fun GesturePad(send: (String) -> Unit, modifier: Modifier = Modifier) {
             .border(WireBorder, theme.border, shape)
             .pointerInput(Unit) {
                 val swipeThreshold = 36.dp.toPx()
+                val inner = CENTER_RADIUS.toPx() + 2.dp.toPx()
+                val outer = ARROW_DISTANCE.toPx() + ARROW_SIZE.toPx() / 2 + 12.dp.toPx()
+                fun zoneAt(p: Offset): String? {
+                    val c = Offset(size.width / 2f, size.height / 2f)
+                    val d = p - c
+                    val dist = d.getDistance()
+                    return when {
+                        dist <= inner -> "SELECT"
+                        dist <= outer -> swipeDirection(d)
+                        else -> null
+                    }
+                }
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
+                    val zone = zoneAt(down.position)
+                    pressedZone = zone
                     var command: String? = null
                     var stillDown = true
                     val completed = withTimeoutOrNull(LONG_PRESS_MS) {
@@ -119,18 +143,24 @@ private fun GesturePad(send: (String) -> Unit, modifier: Modifier = Modifier) {
                             val delta = change.position - down.position
                             if (!change.pressed) {
                                 stillDown = false
-                                command = if (delta.getDistance() < swipeThreshold) "SELECT"
-                                else swipeDirection(delta)
+                                command = if (delta.getDistance() < swipeThreshold) {
+                                    // Tap: an arrow sends its direction, anywhere else is OK/SELECT.
+                                    zone ?: "SELECT"
+                                } else {
+                                    swipeDirection(delta)
+                                }
                                 break
                             }
                             change.consume()
                             if (delta.getDistance() >= swipeThreshold) {
+                                pressedZone = null
                                 command = swipeDirection(delta)
                                 break
                             }
                         }
                         true
                     }
+                    pressedZone = null
                     val isLongPress = completed == null
                     val cmd = if (isLongPress) "BACK" else command
                     if (cmd != null) {
@@ -150,50 +180,62 @@ private fun GesturePad(send: (String) -> Unit, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         val active = flash
-        Chevron("▲", active == "UP", Modifier.align(Alignment.TopCenter).padding(top = 14.dp))
-        Chevron("▼", active == "DOWN", Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp))
-        Chevron("◀︎", active == "LEFT", Modifier.align(Alignment.CenterStart).padding(start = 16.dp))
-        Chevron("▶︎", active == "RIGHT", Modifier.align(Alignment.CenterEnd).padding(end = 16.dp))
+        val lit = { dir: String -> active == dir || pressedZone == dir }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            val lit = active == "SELECT" || active == "BACK"
-            Box(
-                Modifier
-                    .size(86.dp)
-                    .clip(CircleShape)
-                    .background(if (lit) theme.fillPressed else OledBlack)
-                    .border(WireBorder, if (lit) theme.border else theme.dim, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = when (active) {
-                        null, "SELECT" -> "OK"
-                        else -> active
-                    },
-                    color = if (active != null) theme.label else theme.dim,
-                    fontSize = if (active == null || active == "SELECT") 18.sp else 12.sp,
-                    fontFamily = Mono,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
+        ArrowKey("▲", lit("UP"), Modifier.offset(y = -ARROW_DISTANCE))
+        ArrowKey("▼", lit("DOWN"), Modifier.offset(y = ARROW_DISTANCE))
+        ArrowKey("◀\uFE0E", lit("LEFT"), Modifier.offset(x = -ARROW_DISTANCE))
+        ArrowKey("▶\uFE0E", lit("RIGHT"), Modifier.offset(x = ARROW_DISTANCE))
+
+        val centerLit = lit("SELECT") || active == "BACK"
+        Box(
+            Modifier
+                .size(CENTER_RADIUS * 2)
+                .clip(CircleShape)
+                .background(if (centerLit) theme.fillPressed else OledBlack)
+                .border(WireBorder, if (centerLit) theme.border else theme.dim, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
             Text(
-                "HOLD · BACK",
-                color = theme.faint,
-                fontSize = 10.sp,
+                text = when (active) {
+                    null, "SELECT", "UP", "DOWN", "LEFT", "RIGHT" -> "OK"
+                    else -> active
+                },
+                color = if (centerLit) theme.label else theme.dim,
+                fontSize = if (active == "BACK") 13.sp else 18.sp,
                 fontFamily = Mono,
+                fontWeight = FontWeight.Bold,
             )
         }
+
+        Text(
+            "SWIPE · TAP · HOLD = BACK",
+            color = theme.faint,
+            fontSize = 10.sp,
+            fontFamily = Mono,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 12.dp),
+        )
     }
 }
 
 @Composable
-private fun Chevron(glyph: String, active: Boolean, modifier: Modifier) {
+private fun ArrowKey(glyph: String, lit: Boolean, modifier: Modifier) {
     val theme = LocalRemoteTheme.current
-    Text(
-        text = glyph,
-        color = if (active) theme.label else theme.dim,
-        fontSize = if (active) 32.sp else 26.sp,
-        modifier = modifier,
-    )
+    val shape = RoundedCornerShape(16.dp)
+    Box(
+        modifier
+            .size(ARROW_SIZE)
+            .clip(shape)
+            .background(if (lit) theme.fillPressed else theme.accent.copy(alpha = 0.10f))
+            .border(WireBorder, if (lit) theme.border else theme.dim, shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            glyph,
+            color = if (lit) theme.label else theme.label.copy(alpha = 0.8f),
+            fontSize = 22.sp,
+        )
+    }
 }
