@@ -81,6 +81,7 @@ fun AmbientRemoteApp(
     onExit: () -> Unit,
     showSettings: Boolean,
     onShowSettingsChange: (Boolean) -> Unit,
+    onEnterLockScreen: (() -> Unit)? = null,
 ) {
     val theme = RemoteThemes[settings.themeIndex]
     var mode by rememberSaveable { mutableStateOf(RemoteMode.REMOTE) }
@@ -148,7 +149,11 @@ fun AmbientRemoteApp(
                 }
             }
             if (showSettings) {
-                SettingsDialog(settings = settings, onDismiss = { onShowSettingsChange(false) })
+                SettingsDialog(
+                    settings = settings,
+                    onDismiss = { onShowSettingsChange(false) },
+                    onEnterLockScreen = onEnterLockScreen,
+                )
             }
         }
     }
@@ -271,7 +276,11 @@ private fun ModeTabs(mode: RemoteMode, onSelect: (RemoteMode) -> Unit) {
 }
 
 @Composable
-private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
+private fun SettingsDialog(
+    settings: RemoteSettings,
+    onDismiss: () -> Unit,
+    onEnterLockScreen: (() -> Unit)?,
+) {
     val theme = LocalRemoteTheme.current
     var ip by remember { mutableStateOf(settings.ip) }
     var port by remember { mutableStateOf(settings.port.toString()) }
@@ -316,6 +325,49 @@ private fun SettingsDialog(settings: RemoteSettings, onDismiss: () -> Unit) {
                 Slider(
                     value = settings.brightness,
                     onValueChange = { settings.updateBrightness(it) },
+                    valueRange = RemoteSettings.MIN_BRIGHTNESS..1f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = theme.accent,
+                        activeTrackColor = theme.accent,
+                        inactiveTrackColor = theme.faint,
+                    ),
+                )
+                Spacer(Modifier.height(14.dp))
+                Text("LOCK SCREEN", color = theme.dim, fontFamily = Mono, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WireButton(
+                        label = if (settings.runOnLockScreen) "RUN ON LOCK: ON" else "RUN ON LOCK: OFF",
+                        onClick = { settings.updateRunOnLockScreen(!settings.runOnLockScreen) },
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        selected = settings.runOnLockScreen,
+                        dimLabel = !settings.runOnLockScreen,
+                        fontSize = 11.sp,
+                    )
+                    if (onEnterLockScreen != null) {
+                        WireButton(
+                            label = "ENTER LOCK SCREEN",
+                            onClick = onEnterLockScreen,
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("LOCK SCREEN BRIGHTNESS", color = theme.dim, fontFamily = Mono, fontSize = 11.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "${(settings.lockBrightness * 100).roundToInt()}%",
+                        color = theme.label,
+                        fontFamily = Mono,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Slider(
+                    value = settings.lockBrightness,
+                    onValueChange = { settings.updateLockBrightness(it) },
                     valueRange = RemoteSettings.MIN_BRIGHTNESS..1f,
                     colors = SliderDefaults.colors(
                         thumbColor = theme.accent,

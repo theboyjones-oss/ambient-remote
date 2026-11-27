@@ -1,5 +1,8 @@
 package com.example.ambientremote
 
+import android.app.KeyguardManager
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -9,6 +12,9 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -18,6 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -46,15 +53,22 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
     private var blackout by mutableStateOf(false)
     private var showSettings by mutableStateOf(false)
 
+    /** True while the keyguard is showing (remote running on the lock screen). */
+    private var onLockScreen by mutableStateOf(false)
+
+    private val lockAdmin =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (isLockAdmin()) lockAndShowRemote()
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        settings = RemoteSettings(this)
+        applyLockScreenMode(settings.runOnLockScreen)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
-        settings = RemoteSettings(this)
         window.attributes = window.attributes.apply {
             screenBrightness = settings.brightness
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -77,7 +91,15 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
         showSettings = intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true
 
         setContent {
-            LaunchedEffect(settings.brightness) { window.applyBrightness(settings.brightness) }
+            LaunchedEffect(settings.runOnLockScreen) { applyLockScreenMode(settings.runOnLockScreen) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    onLockScreen = keyguard()?.isKeyguardLocked == true
+                    delay(1_000)
+                }
+            }
+            val level = if (onLockScreen) settings.lockBrightness else settings.brightness
+            LaunchedEffect(level) { window.applyBrightness(level) }
             Box(Modifier.fillMaxSize().background(OledBlack)) {
                 AmbientRemoteApp(
                     client = client,
@@ -86,12 +108,64 @@ class AmbientRemoteActivity : ComponentActivity(), SensorEventListener {
                     onExit = { finish() },
                     showSettings = showSettings,
                     onShowSettingsChange = { showSettings = it },
+                    onEnterLockScreen = { enterLockScreen() },
                 )
                 if (blackout) {
                     Box(Modifier.fillMaxSize().background(OledBlack))
                 }
             }
         }
+    }
+
+    private fun keyguard(): KeyguardManager? = getSystemService(KeyguardManager::class.java)
+
+    private fun applyLockScreenMode(on: Boolean) {
+        setShowWhenLocked(on)
+        setTurnScreenOn(on)
+    }
+
+    private fun adminComponent() = ComponentName(this, LockAdminReceiver::class.java)
+
+    private fun isLockAdmin(): Boolean =
+        getSystemService(DevicePolicyManager::class.java)?.isAdminActive(adminComponent()) == true
+
+    /** "Enter Lock Screen": lock the phone, then wake it with the remote showing over the lock screen. */
+    private fun enterLockScreen() {
+        showSettings = false
+        if (!settings.runOnLockScreen) settings.updateRunOnLockScreen(true)
+        applyLockScreenMode(true)
+        if (isLockAdmin()) {
+            lockAndShowRemote()
+        } else {
+            lockAdmin.launch(
+                Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                    .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent())
+                    .putExtra(
+                        DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                        getString(R.string.admin_description),
+                    )
+            )
+        }
+    }
+
+    private fun lockAndShowRemote() {
+        val dpm = getSystemService(DevicePolicyManager::class.java) ?: return
+        try {
+            dpm.lockNow()
+        } catch (_: SecurityException) {
+            return
+        }
+        // Wake the screen straight back up; the remote shows over the lock screen.
+        Handler(Looper.getMainLooper()).postDelayed({
+            val pm = getSystemService(PowerManager::class.java) ?: return@postDelayed
+            @Suppress("DEPRECATION")
+            val wake = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "ambientremote:lockscreen",
+            )
+            wake.acquire(3_000)
+            onLockScreen = true
+        }, 700)
     }
 
     override fun onNewIntent(intent: Intent) {

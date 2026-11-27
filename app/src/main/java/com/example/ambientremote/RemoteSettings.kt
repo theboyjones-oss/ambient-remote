@@ -34,6 +34,26 @@ class RemoteSettings(context: Context) {
         prefs.edit().putFloat(KEY_BRIGHTNESS, brightness).apply()
     }
 
+    /** Show the remote over the lock screen. */
+    var runOnLockScreen by mutableStateOf(prefs.getBoolean(KEY_RUN_ON_LOCK, true))
+        private set
+
+    fun updateRunOnLockScreen(on: Boolean) {
+        runOnLockScreen = on
+        prefs.edit().putBoolean(KEY_RUN_ON_LOCK, on).apply()
+    }
+
+    /** Brightness used while the phone is locked, kept high enough to see the remote. */
+    var lockBrightness by mutableFloatStateOf(
+        prefs.getFloat(KEY_LOCK_BRIGHTNESS, DEFAULT_LOCK_BRIGHTNESS).coerceIn(MIN_BRIGHTNESS, 1f)
+    )
+        private set
+
+    fun updateLockBrightness(level: Float) {
+        lockBrightness = level.coerceIn(MIN_BRIGHTNESS, 1f)
+        prefs.edit().putFloat(KEY_LOCK_BRIGHTNESS, lockBrightness).apply()
+    }
+
     var transport by mutableStateOf(
         runCatching { Transport.valueOf(prefs.getString(KEY_TRANSPORT, null) ?: "") }
             .getOrDefault(Transport.BLUETOOTH)
@@ -65,6 +85,9 @@ class RemoteSettings(context: Context) {
         private const val KEY_THEME = "theme"
         private const val KEY_BRIGHTNESS = "brightness"
         private const val KEY_TRANSPORT = "transport"
+        private const val KEY_RUN_ON_LOCK = "run_on_lock"
+        private const val KEY_LOCK_BRIGHTNESS = "lock_brightness"
+        const val DEFAULT_LOCK_BRIGHTNESS = 0.45f
         const val DEFAULT_BRIGHTNESS = 0.15f
         const val MIN_BRIGHTNESS = 0.01f
     }
